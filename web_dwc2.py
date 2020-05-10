@@ -46,7 +46,7 @@ class web_dwc2:
 		self.reactor = self.printer.get_reactor()
 		self.gcode = self.printer.lookup_object('gcode')
 		self.configfile = self.printer.lookup_object('configfile').read_main_config()
-		self.stepper_enable = self.printer.try_load_module(config, "stepper_enable")
+		self.stepper_enable = self.printer.load_object(config, "stepper_enable")
 		#	gcode execution needs
 		self.gcode_queue = []	#	containing gcode user pushes from dwc2
 		self.gcode_reply = []	#	contains the klippy replys
@@ -78,6 +78,22 @@ class web_dwc2:
 		self.file_infos = {}			#	just read files once
 		self.dwc2()
 		logging.basicConfig(level=logging.DEBUG)
+	
+	# function to replace get_float
+	def get_float(params,key,minval=0.,maxval=0.):
+		if key in params:
+			val = params['key']
+			if str.isnumeric(val):
+				val = float(val)
+				if val < minval:
+					return minval
+				elif val > maxval:
+					return maxval
+				else:
+					return val
+		return minval
+
+		
 	#	function once reactor calls, once klipper feels good
 	def handle_ready(self):
 		#	klippy related
@@ -1020,7 +1036,7 @@ class web_dwc2:
 	#	rrf G10 command - set heaterstemp
 	def cmd_G10(self, params):
 
-		temp = max ( max( self.gcode.get_float('S', params, 0.), self.gcode.get_float('R', params, 0.) ), 0 )
+		temp = max ( max( self.get_float('S', params, 0.), self.get_float('R', params, 0.) ), 0 )
 		command_ = str("M104 T%d S%0.2f" % ( int(params['P']), float(temp)) )
 		return command_
 	#	rrf M0 - cancel print from sd
@@ -1127,7 +1143,7 @@ class web_dwc2:
 	#	set heatbed
 	def cmd_M140(self, params):
 
-		temp = max( self.gcode.get_float('S', params, 0.), 0)
+		temp = max( self.get_float('S', params, 0.), 0)
 		command_ = str("M140 S%d" % ( int(temp)) )
 		return command_
 	#	setting babysteps:
@@ -1137,8 +1153,8 @@ class web_dwc2:
 			self.gcode_reply.append('!! Only idiots try to babystep withoung homing !!')
 			return 0
 
-		mm_step = self.gcode.get_float('Z', params, None)
-		if not mm_step: mm_step = self.gcode.get_float('S', params, None)	#	DWC 1 workarround
+		mm_step = self.get_float('Z', params, None)
+		if not mm_step: mm_step = self.get_float('S', params, None)	#	DWC 1 workarround
 		params = self.parse_params('SET_GCODE_OFFSET Z_ADJUST' + str(mm_step) + ' MOVE1')
 		self.gcode.cmd_SET_GCODE_OFFSET(params)
 		self.gcode_reply.append('Z adjusted by %0.2f' % mm_step)
