@@ -78,9 +78,7 @@ class web_dwc2:
 		self.file_infos = {}			#	just read files once
 		self.dwc2()
 		logging.basicConfig(level=logging.DEBUG)
-	
-	class CommandError(Exception):
-    	pass
+		
 	# function to replace get_float
 	def get_float(self,key,params,minval=None,maxval=None):
 		if key in params:
