@@ -512,7 +512,7 @@ class web_dwc2:
 			gcode_line = self.parse_params(gcodes.pop(0))
 			params = gcode_line.get_command_parameters()
 			#	defaulting to original
-			command = line.get_command()
+			command = gcode_line.get_command()
 
 			#	handle toolchanges
 			if re.match('^T(-)?\d$', command):
