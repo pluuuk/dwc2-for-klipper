@@ -79,8 +79,10 @@ class web_dwc2:
 		self.dwc2()
 		logging.basicConfig(level=logging.DEBUG)
 	
+	class CommandError(Exception):
+    	pass
 	# function to replace get_float
-	def get_float(params,key,minval=0.,maxval=0.):
+	def get_float(self, params,key,minval=0.,maxval=0.):
 		if key in params:
 			val = params['key']
 			if str.isnumeric(val):
