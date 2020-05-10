@@ -18,6 +18,7 @@ import time
 import util
 import shutil
 import serial
+from gcode import GCodeCommand
 
 #
 class web_dwc2:
@@ -45,6 +46,7 @@ class web_dwc2:
 		self.printer = config.get_printer()
 		self.reactor = self.printer.get_reactor()
 		self.gcode = self.printer.lookup_object('gcode')
+		self.sdcard = self.printer.lookup_object('virtual_sdcard', None)
 		self.configfile = self.printer.lookup_object('configfile').read_main_config()
 		self.stepper_enable = self.printer.load_object(config, "stepper_enable")
 		#	gcode execution needs
@@ -78,20 +80,6 @@ class web_dwc2:
 		self.file_infos = {}			#	just read files once
 		self.dwc2()
 		logging.basicConfig(level=logging.DEBUG)
-
-	# function to replace get_float
-	def get_float(self,key,params,minval=None,maxval=None):
-		if key in params:
-			val = params[key]
-			if str.isnumeric(val):
-				val = float(val)
-				if val < minval:
-					return minval
-				elif val > maxval:
-					return maxval
-				else:
-					return val
-		return minval
 
 		
 	#	function once reactor calls, once klipper feels good
@@ -516,7 +504,6 @@ class web_dwc2:
 			'M106': self.cmd_M106 ,		#	set fan
 			'M120': self.cmd_M120 ,		#	save gcode state
 			'M121': self.cmd_M121 ,		#	restore gcode state
-			'M140': self.cmd_M140 ,		#	set bedtemp(limit to 0 mintemp)
 			'M290': self.cmd_M290 ,		#	set babysteps
 			'M999': self.cmd_M999		#	issue restart
 		}
@@ -534,29 +521,30 @@ class web_dwc2:
 		while gcodes:
 
 			#	parse commands - still magic. Wheres the original function in klipper?
-			params = self.parse_params(gcodes.pop(0))
-
+			line = self.parse_params(gcodes.pop(0))
+			params = line._params
 			#	defaulting to original
-			handover = params['#original']
+			handover = line
+			command = line.get_command()
 
 			#	handle toolchanges
-			if re.match('^T(-)?\d$', params['#command']):
+			if re.match('^T(-)?\d$', command):
 				self.current_tool = abs(int(params['T']))
-				if params['#command'] == 'T-1':
+				if command == 'T-1':
 					continue
 
 			#	prevent midprint accidents
 			stat_ = self.get_printer_status()
-			if stat_ in [ 'P', 'D', 'R' ] and params['#command'] not in midprint_allow :
+			if stat_ in [ 'P', 'D', 'R' ] and command not in midprint_allow :
 				web_.write( json.dumps({'buff': 0, 'err': 0}) )
 				#self.set_popup(msg='<b>' + params['#command'] + " not allowed during Print.</b>")
 				#self.set_message(msg=params['#command'] + ' not allowed during print.')
 				continue
 
 			#	rewrite rrfs specials to klipper readable format
-			if params['#command'] in rrf_commands.keys():
-				func_ = rrf_commands.get(params['#command'])
-				handover = func_(params)
+			if command in rrf_commands.keys():
+				func_ = rrf_commands.get(command)
+				handover = func_(line)
 				if handover == 0:
 					self.gcode_reply.append("ok\n")
 
@@ -1034,14 +1022,11 @@ class web_dwc2:
 ##
 
 	#	rrf G10 command - set heaterstemp
-	def cmd_G10(self, params):
-
-		temp = max ( max( self.get_float('S', params, 0.), self.get_float('R', params, 0.) ), 0 )
-		command_ = str("M104 T%d S%0.2f" % ( int(params['P']), float(temp)) )
-		return command_
+	def cmd_G10(self, gcmd):
+		handler = self.gcode.gcode_handlers.get("M104", None)
+		handler(gcmd)
 	#	rrf M0 - cancel print from sd
-	def cmd_M0(self, params):
-
+	def cmd_M0(self, gcmd):
 		self.sdcard.must_pause_work = True 		#	pause print -> sdcard postion is saved in virtual sdcard
 		self.sdcard.file_position = 0			#	reset fileposition
 		self.sdcard.work_timer = None 			#	reset worktimer
@@ -1051,7 +1036,7 @@ class web_dwc2:
 		#	let user define a cancel/pause print macro`?
 		return 0
 	# 	rrf M24 - start/resume print from sdcard
-	def cmd_M24(self, params):
+	def cmd_M24(self, gcmd):
 		if self.sdcard.file_position > 0:
 			self.resume_macro()
 		else:
@@ -1073,11 +1058,11 @@ class web_dwc2:
 				"filament": self.file_infos.get('running_file', {}).get( "filament", 1)
 			}
 			self.reactor.register_callback(self.update_printdata, waketime=self.reactor.monotonic() + 2)
-		self.sdcard.cmd_M24(params)
+		self.sdcard.cmd_M24(gcmd)
 		return 0
 	#	rrf M32 - start print from sdcard
-	def cmd_M32(self, params):
-
+	def cmd_M32(self, gcmd):
+		params = gcmd.get_command_parameters()
 		#	file dwc1 - 'zzz/simplify3D41.gcode'
 		#	file dwc2 - '/gcodes/zzz/simplify3D41.gcode'
 
@@ -1100,9 +1085,10 @@ class web_dwc2:
 				raise 'gcodefile' + fullpath + ' not found'
 
 		self.file_infos['running_file'] = self.rr_fileinfo('knackwurst').result()
-		return self.cmd_M24(params)
+		return self.cmd_M24(gcmd)
 	#	rrf run macro
-	def cmd_M98(self, params):
+	def cmd_M98(self, gcmd):
+		params = gcmd.get_command_parameters()
 
 		path = self.sdpath + "/" + "/".join(params['#original'].split("/")[1:])
 
@@ -1123,50 +1109,47 @@ class web_dwc2:
 
 			return 0
 	#	rrf M106 translation to klipper scale
-	def cmd_M106(self, params):
+	def cmd_M106(self, gcmd):
+		params = gcmd.get_command_parameters()
 
 		if float(params['S']) < .05:
-			command = str("M107")
+			gcmd.command = "M117"
+			gcmd.params = {}
 		else:
-			command = str( params['#command'] + " S" + str(int( float(params['S']) * 255 )) )
-
-		return command
+			gcmd.params['S'] = str(int( float(params['S']) * 255 ))
+		return gcmd
 	#	fo ecxecuting m112 now!
-	def cmd_M112(self, params):
+	def cmd_M112(self, gcmd):
 		self.printer.invoke_shutdown('Emergency Stop from DWC 2')
 	#	save states butttons
-	def cmd_M120(self, params):
-		return "SAVE_GCODE_STATE NAME=DWC_BOTTON"
+	def cmd_M120(self, gcmd):
+		gcmd._params = {'NAME': 'DWC_BOTTON'}
+		return self.gcode.cmd_SAVE_GCODE_STATE(gcmd)
 	#	restore states butttons
-	def cmd_M121(self, params):
-		return "RESTORE_GCODE_STATE NAME=DWC_BOTTON MOVE=0"
-	#	set heatbed
-	def cmd_M140(self, params):
-
-		temp = max( self.get_float('S', params, 0.), 0)
-		command_ = str("M140 S%d" % ( int(temp)) )
-		return command_
+	def cmd_M121(self, gcmd):
+		gcmd._params = {'NAME': 'DWC_BOTTON', 'MOVE': 0}
+		return self.gcode.cmd_RESTORE_GCODE_STATE(gcmd)
+	#	set heatbed, now handled when not defined in cmd_default
 	#	setting babysteps:
-	def cmd_M290(self, params):
-
+	def cmd_M290(self, gcmd):
 		if self.get_axes_homed()[2] == 0:
 			self.gcode_reply.append('!! Only idiots try to babystep withoung homing !!')
 			return 0
 
-		mm_step = self.get_float('Z', params, None)
-		if not mm_step: mm_step = self.get_float('S', params, None)	#	DWC 1 workarround
-		params = self.parse_params('SET_GCODE_OFFSET Z_ADJUST' + str(mm_step) + ' MOVE1')
-		self.gcode.cmd_SET_GCODE_OFFSET(params)
+		mm_step = gcmd.get_float('Z', None)
+		if not mm_step: mm_step = self.get_float('S', None)	#	DWC 1 workarround
+		gcmd2 = self.parse_params('SET_GCODE_OFFSET Z_ADJUST' + str(mm_step) + ' MOVE1')
+		gcmd._params = gcmd2.get_command_parameters()
+		self.gcode.cmd_SET_GCODE_OFFSET(gcmd)
 		self.gcode_reply.append('Z adjusted by %0.2f' % mm_step)
-
 		return 0
 	#	Ok button in DWC webif
-	def cmd_M292(self, params):
+	def cmd_M292(self, gcmd):
 		self.popup = None
 	#	rrf restart command
-	def cmd_M999(self, params):
+	def cmd_M999(self, gcmd):
 		#needs0 otherwise the printer gets restarted after emergency buttn is pressed
-		return "RESTART"
+		cmd_RESTART(gcmd)
 	#	launch custom cancel macro
 	def cancel_macro(self):
 		macro_path = self.sdpath + '/macros/' + 'cancel.g'
@@ -1203,27 +1186,21 @@ class web_dwc2:
 		self.gcode.dwc_lock = self.gcode.is_processing_data = True
 
 		while self.gcode_queue:
-
 			handle_ = self.gcode_queue.pop(0)
-			params = self.parse_params(handle_)
-
-			if params['#command'] in lowers:
-				params = self.parse_params(handle_, low_=True)
-
+			gcmd = self.parse_params(handle_)
+			command = gcmd.get_command()
+			
+			if command in ack_needers or command in self.klipper_macros:
+				gcmd = self.parse_params(handle_,need_ack=True)
 			try:
-				handler = self.gcode.gcode_handlers.get(params['#command'], self.gcode.cmd_default)
+				handler = self.gcode.gcode_handlers.get(command, self.gcode.cmd_default)
 				handler(params)
 			except Exception as e:
 				self.gcode_reply.append( "" )
-				logging.error( "failed: " + params['#command'] + str(e) )
-				#self.set_popup(msg=params['#command'] + ' resulted with: ' + str(e))
-				#self.set_message(msg="Warning: " + params['#command'] + ' resulted with: ' + str(e))
-				time.sleep(1)	#	not beautiful but webif ignores errors on button commands otherwise
+				logging.error( "failed: " + command + str(e) )
 				self.gcode_reply.append( "!! " + str(e) + "\n" )
 			else:
-				logging.error( "passed: " + params['#command'] )
-				if params['#command'] in ack_needers or params['#command'] in self.klipper_macros:
-					self.gcode_reply.append( "" )	#	pseudo ack
+				logging.error( "passed: " + command )
 
 		self.gcode.dwc_lock = self.gcode.is_processing_data = False
 	#	launch individual pause macro
@@ -1244,31 +1221,29 @@ class web_dwc2:
 
 		if self.gcode_queue:
 			self.reactor.register_callback(self.gcode_reactor_callback)
-	#	parses gcode commands into params -took from johns work
-	def parse_params(self, line, low_=False):
-		logging.error(line)
-		args_r = re.compile('([A-Z_]+|[A-Z*/])')
-		if low_:
-			line = origline = line.strip().lower()
-		else:
-			line = origline = line.strip()
+	
+	
+	#	parses gcode commands into params - lifted from gcode._process_commands
+	args_r = re.compile('([A-Z_]+|[A-Z*/])')
+	def parse_params(self, line, need_ack=True):
+		line = origline = line.strip()
 		cpos = line.find(';')
 		if cpos >= 0:
 			line = line[:cpos]
-		# Break command into parts
-		parts = args_r.split(line.upper())[1:]
-		params = { parts[i]: parts[i+1].strip()
-					for i in range(0, len(parts), 2) }
-		params['#original'] = origline
-		if parts and parts[0] == 'N':
+		# Break line into parts and determine command
+		parts = self.args_r.split(line.upper())
+		numparts = len(parts)
+		cmd = ""
+		if numparts >= 3 and parts[1] != 'N':
+			cmd = parts[1] + parts[2].strip()
+		elif numparts >= 5 and parts[1] == 'N':
 			# Skip line number at start of command
-			del parts[:2]
-		if not parts:
-			# Treat empty line as empty command
-			parts = ['', '']
-		params['#command'] = cmd = parts[0] + parts[1].strip()
-
-		return params
+			cmd = parts[3] + parts[4].strip()
+		# Build gcode "params" dictionary
+		params = { parts[i]: parts[i+1].strip()
+					for i in range(1, numparts, 2) }
+		gcmd = GCodeCommand(self.gcode, cmd, origline, params, need_ack)
+		return gcmd
 	#	launch individual resume macro
 	def resume_macro(self):
 
