@@ -82,7 +82,7 @@ class web_dwc2:
 	class CommandError(Exception):
     	pass
 	# function to replace get_float
-	def get_float(self, params,key,minval=None,maxval=None):
+	def get_float(self,key,params,minval=None,maxval=None):
 		if key in params:
 			val = params['key']
 			if str.isnumeric(val):
