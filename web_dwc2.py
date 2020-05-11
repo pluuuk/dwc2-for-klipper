@@ -511,7 +511,6 @@ class web_dwc2:
 			#	parse commands - still magic. Wheres the original function in klipper?
 			gcode_line = self.parse_params(gcodes.pop(0))
 			params = gcode_line.get_command_parameters()
-			#	defaulting to original
 			command = gcode_line.get_command()
 
 			#	handle toolchanges
@@ -1005,8 +1004,9 @@ class web_dwc2:
 		params = gcmd.get_command_parameters()
 		params['T'] = params['P']
 		del params['P']
+		gcmd._command = 'M104'
 		handler = self.gcode.gcode_handlers.get("M104", None)
-		return handler
+		handler(gcmd)
 	#	rrf M0 - cancel print from sd
 	def cmd_M0(self, gcmd):
 		self.sdcard.must_pause_work = True 		#	pause print -> sdcard postion is saved in virtual sdcard
@@ -1015,8 +1015,6 @@ class web_dwc2:
 		self.sdcard.current_file = None 		#	
 		self.printfile = None
 		self.cancel_macro()
-		#	let user define a cancel/pause print macro`?
-		return 0
 	# 	rrf M24 - start/resume print from sdcard
 	def cmd_M24(self, gcmd):
 		if self.sdcard.file_position > 0:
@@ -1041,7 +1039,6 @@ class web_dwc2:
 			}
 			self.reactor.register_callback(self.update_printdata, waketime=self.reactor.monotonic() + 2)
 		self.sdcard.cmd_M24(gcmd)
-		return 0
 	#	rrf M32 - start print from sdcard
 	def cmd_M32(self, gcmd):
 		original = gcmd.get_commandline()
@@ -1067,7 +1064,7 @@ class web_dwc2:
 				raise 'gcodefile' + fullpath + ' not found'
 
 		self.file_infos['running_file'] = self.rr_fileinfo('knackwurst').result()
-		return self.cmd_M24(gcmd)
+		self.cmd_M24(gcmd)
 	#	rrf run macro
 	def cmd_M98(self, gcmd):
 		original = gcmd.get_commandline()
@@ -1098,18 +1095,19 @@ class web_dwc2:
 			gcmd._params = {}
 		else:
 			gcmd._params['S'] = str(int( float(params['S']) * 255 ))
-		return gcmd
+		handler = self.gcode.gcode_handlers.get("M117", None)
+		handler(gcmd)
 	#	fo ecxecuting m112 now!
 	def cmd_M112(self, gcmd):
 		self.printer.invoke_shutdown('Emergency Stop from DWC 2')
 	#	save states butttons
 	def cmd_M120(self, gcmd):
 		gcmd._params = {'NAME': 'DWC_BOTTON'}
-		return self.gcode.cmd_SAVE_GCODE_STATE(gcmd)
+		self.gcode.cmd_SAVE_GCODE_STATE(gcmd)
 	#	restore states butttons
 	def cmd_M121(self, gcmd):
 		gcmd._params = {'NAME': 'DWC_BOTTON', 'MOVE': 0}
-		return self.gcode.cmd_RESTORE_GCODE_STATE(gcmd)
+		self.gcode.cmd_RESTORE_GCODE_STATE(gcmd)
 	#	set heatbed, now handled when not defined in cmd_default
 	#	setting babysteps:
 	def cmd_M290(self, gcmd):
@@ -1120,8 +1118,7 @@ class web_dwc2:
 		mm_step = gcmd.get_float('Z', None)
 		if not mm_step: mm_step = self.get_float('S', None)	#	DWC 1 workarround
 		gcmd2 = self.parse_params('SET_GCODE_OFFSET Z_ADJUST' + str(mm_step) + ' MOVE1')
-		gcmd._params = gcmd2.get_command_parameters()
-		self.gcode.cmd_SET_GCODE_OFFSET(gcmd)
+		self.gcode.cmd_SET_GCODE_OFFSET(gcmd2)
 		self.gcode_reply.append('Z adjusted by %0.2f' % mm_step)
 
 	#	Ok button in DWC webif
@@ -1130,7 +1127,7 @@ class web_dwc2:
 	#	rrf restart command
 	def cmd_M999(self, gcmd):
 		#needs0 otherwise the printer gets restarted after emergency buttn is pressed
-		cmd_RESTART(gcmd)
+		self.gcode.cmd_RESTART(gcmd)
 	#	launch custom cancel macro
 	def cancel_macro(self):
 		macro_path = self.sdpath + '/macros/' + 'cancel.g'
@@ -1141,10 +1138,10 @@ class web_dwc2:
 				lines = f.readlines()
 
 			for line in [x.strip() for x in lines]:
-				self.gcode_queue.append(line)
+				self.gcode_queue.append(self.parse_params(line))
 
 		elif 'CANCEL_PRINT' in self.klipper_macros:
-			self.gcode_queue.append('CANCEL_PRINT')
+			self.gcode_queue.append(self.parse_params('CANCEL_PRINT'))
 
 		if self.gcode_queue:
 			self.reactor.register_callback(self.gcode_reactor_callback)
