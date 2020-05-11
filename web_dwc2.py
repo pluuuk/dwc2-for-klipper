@@ -1002,6 +1002,9 @@ class web_dwc2:
 
 	#	rrf G10 command - set heaterstemp
 	def cmd_G10(self, gcmd):
+		params = gcmd.get_command_parameters()
+		params['T'] = params['P']
+		del params['P']
 		handler = self.gcode.gcode_handlers.get("M104", None)
 		return handler
 	#	rrf M0 - cancel print from sd
