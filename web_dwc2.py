@@ -1117,7 +1117,7 @@ class web_dwc2:
 
 		mm_step = gcmd.get_float('Z', None)
 		if not mm_step: mm_step = gcmd.get_float('S', None)	#	DWC 1 workarround
-		gcmd2 = self.parse_params('SET_GCODE_OFFSET Z_ADJUST=' + str(mm_step) + ' MOVE1')
+		gcmd2 = self.parse_params('SET_GCODE_OFFSET Z_ADJUST=' + str(mm_step) + ' MOVE=1')
 		self.gcode.cmd_SET_GCODE_OFFSET(gcmd2)
 		self.gcode_reply.append('Z adjusted by %0.2f' % mm_step)
 
