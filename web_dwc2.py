@@ -98,7 +98,7 @@ class web_dwc2:
 
 		# override default instance method by one that calls dwc2 response callback
 		self.gcode.respond_raw = self.respond_raw
-		self.respond_callbacks = [self.gcode_response)] #	if thers a gcode reply, phone me -> see fheilmans its missing in master
+		self.respond_callbacks = [self.gcode_response] #	if thers a gcode reply, phone me -> see fheilmans its missing in master
 
 		#	hopeflly noone get more than 4 extruders up :D
 		self.extruders = [ self.printer.lookup_object('extruder', None) ]
