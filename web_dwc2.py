@@ -49,12 +49,13 @@ class web_dwc2:
 		self.sdcard = self.printer.lookup_object('virtual_sdcard', None)
 		self.configfile = self.printer.lookup_object('configfile').read_main_config()
 		self.stepper_enable = self.printer.load_object(config, "stepper_enable")
+		
 		#	gcode execution needs
 		self.gcode_queue = []	#	containing gcode user pushes from dwc2
 		self.gcode_reply = []	#	contains the klippy replys
 		self.klipper_macros = []
 		self.gcode.dwc_lock = False
-		self.gcode.register_respond_callback(self.gcode_response) #	if thers a gcode reply, phone me -> see fheilmans its missing in master
+
 		#	once klipper is ready start pre_flight function - not happy with this. If klipper fails to launch -> no web if?
 		self.printer.register_event_handler("klippy:ready", self.handle_ready)
 		self.printer.register_event_handler("klippy:disconnect", self.shutdown)
@@ -64,12 +65,12 @@ class web_dwc2:
 		self.sdpath = self.configfile.getsection("virtual_sdcard").get("path", None)
 		self.sdpath = os.path.normpath(os.path.expanduser(self.sdpath))
 		if not self.sdpath:
-			logging.error( "DWC2 failed to start, no sdcard configured" )
+			logging.exception( "DWC2 failed to start, no sdcard configured" )
 			return
 		self.kin_name = self.configfile.getsection("printer").get("kinematics")
 		self.web_root = self.sdpath + "/" + self.webpath
 		if not os.path.isfile( self.web_root + "/" + "index.html" ):
-			logging.error( "DWC2 failed to start, no webif found in " + self.web_root )
+			logging.exception( "DWC2 failed to start, no webif found in " + self.web_root )
 			return
 		# manage client sessions
 		self.sessions = {}
@@ -90,7 +91,15 @@ class web_dwc2:
 		self.heater_bed = self.printer.lookup_object('heater_bed', None)
 		self.fan = self.printer.lookup_object('fan', None)
 		self.sdcard = self.printer.lookup_object('virtual_sdcard', None)
+
+		# override default sdcard get_file_list to include files in ./gcodes and reduce custom file loading in here
+		self.sdcard.get_file_list = self.get_file_list
 		self.toolhead = self.printer.lookup_object('toolhead', None)
+
+		# override default instance method by one that calls dwc2 response callback
+		self.gcode.respond_raw = self.respond_raw
+		self.respond_callbacks = [self.gcode_response)] #	if thers a gcode reply, phone me -> see fheilmans its missing in master
+
 		#	hopeflly noone get more than 4 extruders up :D
 		self.extruders = [ self.printer.lookup_object('extruder', None) ]
 		for i in range(1,10):
@@ -994,7 +1003,30 @@ class web_dwc2:
 			ret_ = {"err":0}
 
 		return ret_
-
+	
+	def respond_raw(self, msg):
+        if self.gcode.is_fileinput:
+            return
+        try:
+            os.write(self.gcode.fd, msg+"\n")
+            for callback in self.respond_callbacks:
+                callback(msg+"\n")
+        except os.error:
+            logging.exception("Write g-code response")
+	
+	def get_file_list(self):
+		dname = self.sdcard.sdcard_dirname
+		try:
+			filenames_virtual_sd = os.listdir(dname)
+			filenames_dwc2 = ['gcodes/{}'.format(ff)  for ff in os.listdir(dname+'/gcodes')]
+			filenames = filenames_virtual_sd + filenames_dwc2
+			return [(fname, os.path.getsize(os.path.join(dname, fname)))
+					for fname in sorted(filenames, key=str.lower)
+					if not fname.startswith('.')
+					and os.path.isfile((os.path.join(dname, fname)))]
+		except:
+			logging.exception("virtual_sdcard get_file_list")
+			raise self.gcode.error("Unable to get file list")
 ##
 #	Gcode execution related stuff
 ##
@@ -1013,7 +1045,6 @@ class web_dwc2:
 		self.sdcard.file_position = 0			#	reset fileposition
 		self.sdcard.work_timer = None 			#	reset worktimer
 		self.sdcard.current_file = None 		#	
-		self.printfile = None
 		self.cancel_macro()
 	# 	rrf M24 - start/resume print from sdcard
 	def cmd_M24(self, gcmd):
@@ -1041,28 +1072,7 @@ class web_dwc2:
 		self.sdcard.cmd_M24(gcmd)
 	#	rrf M32 - start print from sdcard
 	def cmd_M32(self, gcmd):
-		original = gcmd.get_commandline()
-		#	file dwc1 - 'zzz/simplify3D41.gcode'
-		#	file dwc2 - '/gcodes/zzz/simplify3D41.gcode'
-
-		file = '/'.join(original.split(' ')[1:])
-		if '/gcodes/' not in file:	#	DWC 1 work arround
-			fullpath = self.sdpath + '/gcodes/' + original.split()[1]
-		else:
-			fullpath = self.sdpath + file
-
-		#	load a file to scurrent_file if its none
-		if not self.sdcard.current_file:
-			if os.path.isfile(fullpath):
-				self.printfile = open(fullpath, 'rb')									#	get file object as klippy would do
-				self.printfile.seek(0, os.SEEK_END)
-				self.printfile.seek(0)
-				self.sdcard.current_file = self.printfile 								#	set it as current file
-				self.sdcard.file_position = 0 											#	postions / size
-				self.sdcard.file_size = os.stat(fullpath).st_size
-			else:
-				raise 'gcodefile' + fullpath + ' not found'
-
+		self.sdcard.cmd_M23(gcmd)
 		self.file_infos['running_file'] = self.rr_fileinfo('knackwurst').result()
 		self.cmd_M24(gcmd)
 	#	rrf run macro
