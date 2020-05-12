@@ -1005,14 +1005,14 @@ class web_dwc2:
 		return ret_
 	
 	def respond_raw(self, msg):
-        if self.gcode.is_fileinput:
-            return
-        try:
-            os.write(self.gcode.fd, msg+"\n")
-            for callback in self.respond_callbacks:
-                callback(msg+"\n")
-        except os.error:
-            logging.exception("Write g-code response")
+		if self.gcode.is_fileinput:
+			return
+		try:
+			os.write(self.gcode.fd, msg+"\n")
+			for callback in self.respond_callbacks:
+				callback(msg+"\n")
+		except os.error:
+			logging.exception("Write g-code response")
 	
 	def get_file_list(self):
 		dname = self.sdcard.sdcard_dirname
