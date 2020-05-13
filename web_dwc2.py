@@ -1085,7 +1085,7 @@ class web_dwc2:
 			#	now we know its no macro file
 			klipma = original.split("/")[-1].replace("\"", "")
 			if klipma in self.klipper_macros:
-				return self.parse_params(klipma)
+				return self.gcode_queue.append(self.parse_params(klipma))
 			else:
 				return None
 		else:
@@ -1112,12 +1112,14 @@ class web_dwc2:
 		self.printer.invoke_shutdown('Emergency Stop from DWC 2')
 	#	save states butttons
 	def cmd_M120(self, gcmd):
-		gcmd._params = {'NAME': 'DWC_BOTTON'}
-		self.gcode.cmd_SAVE_GCODE_STATE(gcmd)
+		gcmd = self.parse_params('SAVE_GCODE_STATE NAME=DWC')
+		handler = self.gcode.gcode_handlers.get("SAVE_GCODE_STATE", self.gcode.cmd_default)
+		handler(gcmd)
 	#	restore states butttons
 	def cmd_M121(self, gcmd):
-		gcmd._params = {'NAME': 'DWC_BOTTON', 'MOVE': 0}
-		self.gcode.cmd_RESTORE_GCODE_STATE(gcmd)
+		gcmd = self.parse_params('RESTORE_GCODE_STATE NAME=DWC MOVE=0')
+		handler = self.gcode.gcode_handlers.get("RESTORE_GCODE_STATE", self.gcode.cmd_default)
+		handler(gcmd)
 	#	set heatbed, now handled when not defined in cmd_default
 	#	setting babysteps:
 	def cmd_M290(self, gcmd):
