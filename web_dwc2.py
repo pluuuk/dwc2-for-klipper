@@ -1075,8 +1075,10 @@ class web_dwc2:
 		orig = gcmd.get_commandline()
 		filename = orig[orig.find("M23") + 4:].split()[0].strip()
 		gcodesfilename = 'gcodes/{}'.format(filename)
-		if os.path.exists("/".join([self.sdpath, gcodesfilename])):
-			self.sdcard.cmd_M23(self.parse_params("M23 \"{}\"".format(gcodesfilename)))
+		full_path = "/".join([self.sdpath, gcodesfilename])
+		if os.path.exists(full_path):
+   			self.set_message(full_path)
+			self.sdcard.cmd_M23(self.parse_params("M23 {}".format(gcodesfilename)))
 		else:
 			self.sdcard.cmd_M23(gcmd)
 		self.file_infos['running_file'] = self.rr_fileinfo('knackwurst').result()
