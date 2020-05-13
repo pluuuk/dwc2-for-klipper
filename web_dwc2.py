@@ -1073,11 +1073,10 @@ class web_dwc2:
 	#	rrf M32 - start print from sdcard
 	def cmd_M32(self, gcmd):
 		orig = gcmd.get_commandline()
-		filename = orig[orig.find("M23") + 4:].split()[0].strip()
+		filename = orig.split()[1]
 		gcodesfilename = 'gcodes/{}'.format(filename)
 		full_path = "/".join([self.sdpath, gcodesfilename])
 		if os.path.exists(full_path):
-   			self.set_message(full_path)
 			self.sdcard.cmd_M23(self.parse_params("M23 {}".format(gcodesfilename)))
 		else:
 			self.sdcard.cmd_M23(gcmd)
@@ -1198,7 +1197,6 @@ class web_dwc2:
 		while self.gcode_queue:
 			gcmd = self.gcode_queue.pop(0)
 			command = gcmd.get_command()
-			
 			if command in ack_needers or command in self.klipper_macros:
 				gcmd._need_ack = True
 			try:
