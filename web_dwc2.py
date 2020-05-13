@@ -1228,7 +1228,7 @@ class web_dwc2:
 				self.gcode_queue.append(self.parse_params(line))
 
 		elif 'PAUSE_PRINT' in self.klipper_macros:
-			self.gcode_queue.append(parse_params('PAUSE_PRINT'))
+			self.gcode_queue.append(self.parse_params('PAUSE_PRINT'))
 
 		if self.gcode_queue:
 			self.reactor.register_callback(self.gcode_reactor_callback)
