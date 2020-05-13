@@ -1072,7 +1072,13 @@ class web_dwc2:
 		self.sdcard.cmd_M24(gcmd)
 	#	rrf M32 - start print from sdcard
 	def cmd_M32(self, gcmd):
-		self.sdcard.cmd_M23(gcmd)
+		orig = gcmd.get_commandline()
+		filename = orig[orig.find("M23") + 4:].split()[0].strip()
+		gcodesfilename = 'gcodes/{}'.format(filename)
+		if os.path.exists("/".join([self.sdpath, gcodesfilename])):
+			self.sdcard.cmd_M23(self.parse_params("M23 \"{}\"".format(gcodesfilename)))
+		else:
+			self.sdcard.cmd_M23(gcmd)
 		self.file_infos['running_file'] = self.rr_fileinfo('knackwurst').result()
 		self.cmd_M24(gcmd)
 	#	rrf run macro
@@ -1099,13 +1105,12 @@ class web_dwc2:
 	#	rrf M106 translation to klipper scale
 	def cmd_M106(self, gcmd):
 		params = gcmd.get_command_parameters()
-
 		if float(params['S']) < .05:
-			gcmd._command = "M117"
+			gcmd._command = "M107"
 			gcmd._params = {}
 		else:
 			gcmd._params['S'] = str(int( float(params['S']) * 255 ))
-		handler = self.gcode.gcode_handlers.get("M117", None)
+		handler = self.gcode.gcode_handlers.get(gcmd.get_command(), None)
 		handler(gcmd)
 	#	fo ecxecuting m112 now!
 	def cmd_M112(self, gcmd):
